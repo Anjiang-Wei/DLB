@@ -56,6 +56,12 @@ public:
                   const Task&              task,
                   const SliceTaskInput&    input,
                         SliceTaskOutput&   output) override;
+  void select_steal_targets(const MapperContext         ctx,
+                            const SelectStealingInput&  input,
+                                SelectStealingOutput& output) override;
+  void permit_steal_request(const MapperContext       ctx,
+                            const StealRequestInput&  input,
+                               StealRequestOutput& output) override;
 private:
 };
 
@@ -277,6 +283,32 @@ template<int DIM>
       slice.stealable = stealable;
       slices.push_back(slice);
     }
+  }
+}
+
+void DLBMapper::select_steal_targets(const MapperContext         ctx,
+                          const SelectStealingInput&  input,
+                                SelectStealingOutput& output)
+{
+  printf("select_steal_targets invoked\n");
+  output.targets.clear();
+  for (auto p : local_cpus) {
+    if (local_proc == p) continue;
+    output.targets.insert(p);
+    printf("select_steal_targets insert one local cpu processor\n");
+  }
+}
+
+void DLBMapper::permit_steal_request(const MapperContext       ctx,
+                          const StealRequestInput&  input,
+                               StealRequestOutput& output)
+{
+  printf("permit_steal_request invoked\n");
+  output.stolen_tasks.clear();
+  // Iterate over stealable tasks
+  for (auto task : input.stealable_tasks) {
+    output.stolen_tasks.insert(task);
+    printf("permit_steal_request insert one stealable task\n");
   }
 }
 
