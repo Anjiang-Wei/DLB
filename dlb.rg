@@ -63,8 +63,8 @@ rawset(_G, "ceil", cmath.ceil)
 
 task f(i: int)
 -- just wait for a random number of seconds
-  unistd.sleep(1)
-  format.println("DBL {}", i)
+  unistd.sleep(i / 8)
+  format.println("DBL {} wait for {} seconds", i, i / 8)
 end
 
 task toplevel()
