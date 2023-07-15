@@ -62,6 +62,9 @@ public:
   void permit_steal_request(const MapperContext       ctx,
                             const StealRequestInput&  input,
                                StealRequestOutput& output) override;
+  void default_policy_select_target_processors(MapperContext ctx,
+                                               const Task &task,
+                                               std::vector<Processor> &target_procs) override;
 private:
 };
 
@@ -92,6 +95,13 @@ void DLBMapper::select_task_options(const MapperContext    ctx,
     output.replicate = false;
 }
 
+
+void DLBMapper::default_policy_select_target_processors(MapperContext ctx,
+                                                        const Task &task,
+                                                        std::vector<Processor> &target_procs)
+{
+  target_procs.push_back(task.target_proc);
+}
 
 void DLBMapper::slice_task(const MapperContext      ctx,
                           const Task&              task,
