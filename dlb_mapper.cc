@@ -24,6 +24,7 @@
 
 #include "mappers/default_mapper.h"
 #include "mappers/logging_wrapper.h"
+#include <chrono>
 
 using namespace Legion;
 using namespace Legion::Mapping;
@@ -65,7 +66,33 @@ public:
   void default_policy_select_target_processors(MapperContext ctx,
                                                const Task &task,
                                                std::vector<Processor> &target_procs) override;
+  MapperSyncModel get_mapper_sync_model() const override;
+  void select_tasks_to_map(const MapperContext ctx,
+                           const SelectMappingInput& input,
+                               SelectMappingOutput& output) override;
+   void map_task(const MapperContext ctx,
+                const Task& task,
+                const MapTaskInput& input,
+                MapTaskOutput& output) override;
+  void report_profiling(const MapperContext ctx,
+                        const Task& task,
+                        const TaskProfilingInfo& input) override;
 private:
+
+  // InFlightTask represents a currently executing task.
+  struct InFlightTask {
+    // A unique identifier for an instance of a task.
+    UniqueID id;
+    // An event that we will trigger when the task completes.
+    MapperEvent event;
+    // The point in time when we scheduled the task.
+    std::chrono::high_resolution_clock::time_point schedTime;
+  };
+  // queue maintains the current tasks executing on each processor.
+  std::map<Processor, std::deque<InFlightTask>> queue;
+  // maxInFlightTasks controls how many tasks can execute at a time
+  // on a single processor.
+  size_t maxInFlightTasks = 2;
 };
 
 DLBMapper::DLBMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -96,6 +123,117 @@ void DLBMapper::select_task_options(const MapperContext    ctx,
 }
 
 
+void DLBMapper::select_tasks_to_map(const MapperContext ctx,
+                         const SelectMappingInput& input,
+                               SelectMappingOutput& output)
+{
+  // Record when we are scheduling tasks.
+  auto schedTime = std::chrono::high_resolution_clock::now();
+
+  // Maintain an event that we can return in case we don't schedule anything.
+  // This event will be used by the runtime to determine when it should ask us
+  // to schedule more tasks for mapping. We also maintain a timestamp with the
+  // return event. This is so that we choose the earliest scheduled task to wait
+  // on, so that we can keep the processors busy.
+  MapperEvent returnEvent;
+  auto returnTime = std::chrono::high_resolution_clock::time_point::max();
+
+  // Schedule all of our available tasks, except tasks with TID_WORKER,
+  // to which we'll backpressure.
+  for (auto task : input.ready_tasks) {
+    bool schedule = true;
+    if (std::string(task->get_task_name()) == std::string("f")) {
+      printf("select_tasks_to_map for f %d\n", (int) task->get_unique_id());
+    // if (task->task_id == TID_WORKER && this->enableBackPressure) {
+      // See how many tasks we have in flight.
+      auto inflight = this->queue[task->target_proc];
+      if (inflight.size() == this->maxInFlightTasks) {
+        printf("enable backpressure!\n");
+        // We've hit the cap, so we can't schedule any more tasks.
+        schedule = false;
+        // As a heuristic, we'll wait on the first mapper event to
+        // finish, as it's likely that one will finish first. We'll also
+        // try to get a task that will complete before the current best.
+        auto front = inflight.front();
+        if (front.schedTime < returnTime) {
+          returnEvent = front.event;
+          returnTime = front.schedTime;
+        }
+      } else {
+        // Otherwise, we can schedule the task. Create a new event
+        // and queue it up on the processor.
+        this->queue[task->target_proc].push_back({
+          .id = task->get_unique_id(),
+          .event = this->runtime->create_mapper_event(ctx),
+          .schedTime = schedTime,
+        });
+      }
+    }
+    // Schedule tasks that passed the check.
+    if (schedule) {
+      output.map_tasks.insert(task);
+    }
+  }
+  // If we don't schedule any tasks for mapping, the runtime needs to know
+  // when to ask us again to schedule more things. Return the MapperEvent we
+  // selected earlier.
+  if (output.map_tasks.size() == 0) {
+    assert(returnEvent.exists());
+    output.deferral_event = returnEvent;
+  }
+}
+
+void DLBMapper::map_task(const MapperContext ctx,
+                const Task& task,
+                const MapTaskInput& input,
+                MapTaskOutput& output)
+{
+  DefaultMapper::map_task(ctx, task, input, output);
+  // We need to know when the TID_WORKER tasks complete, so we'll ask the runtime
+  // to give us profiling information when they complete.
+  if (std::string(task.get_task_name()) == std::string("f")) {
+    std::deque<InFlightTask>& inflight = this->queue[task.target_proc];
+    printf("map_task for task %s %d, inflight.size() = %d\n",
+            task.get_task_name(), (int) task.get_unique_id(), (int) inflight.size());
+    output.task_prof_requests.add_measurement<ProfilingMeasurements::OperationStatus>();
+  }
+}
+
+void DLBMapper::report_profiling(const MapperContext ctx,
+                        const Task& task,
+                        const TaskProfilingInfo& input)
+{
+  // Only TID_WORKER tasks should have profiling information.
+  assert(std::string(task.get_task_name()) == std::string("f"));
+  // We expect all of our tasks to complete successfully
+  auto prof = input.profiling_responses.get_measurement<ProfilingMeasurements::OperationStatus>();
+  assert(prof->result == Realm::ProfilingMeasurements::OperationStatus::COMPLETED_SUCCESSFULLY);
+  // Clean up after ourselves.
+  delete prof;
+  // Iterate through the queue and find the event for this task instance.
+  std::deque<InFlightTask>& inflight = this->queue[task.target_proc];
+  MapperEvent event;
+  for (auto it = inflight.begin(); it != inflight.end(); it++) {
+    if (it->id == task.get_unique_id()) {
+      event = it->event;
+      inflight.erase(it);
+      break;
+    }
+  }
+  assert(event.exists());
+  // Trigger the event so that the runtime knows it's time to schedule
+  // some more tasks to map.
+  this->runtime->trigger_mapper_event(ctx, event);
+}
+
+// We use the non-reentrant serialized model as we want to ensure sole access to
+// mapper data structures. If we use the reentrant model, we would have to lock
+// accesses to the queue, since we use it interchanged with calls into the runtime.
+Mapper::MapperSyncModel DLBMapper::get_mapper_sync_model() const
+{
+  return SERIALIZED_NON_REENTRANT_MAPPER_MODEL;
+}
+
 void DLBMapper::default_policy_select_target_processors(MapperContext ctx,
                                                         const Task &task,
                                                         std::vector<Processor> &target_procs)
@@ -112,12 +250,12 @@ void DLBMapper::slice_task(const MapperContext      ctx,
   // log_mapper.spew("Default slice_task in %s", get_mapper_name());
 
   std::vector<VariantID> variants;
-  runtime->find_valid_variants(ctx, task.task_id, variants);
+  runtime->find_valid_variants(ctx, task.get_unique_id(), variants);
   /* find if we have a procset variant for task */
   for(unsigned i = 0; i < variants.size(); i++)
   {
     const ExecutionConstraintSet exset =
-        runtime->find_execution_constraints(ctx, task.task_id, variants[i]);
+        runtime->find_execution_constraints(ctx, task.get_unique_id(), variants[i]);
     if(exset.processor_constraint.can_use(Processor::PROC_SET)) {
 
         // Before we do anything else, see if it is in the cache
@@ -300,26 +438,27 @@ void DLBMapper::select_steal_targets(const MapperContext         ctx,
                           const SelectStealingInput&  input,
                                 SelectStealingOutput& output)
 {
-  printf("select_steal_targets invoked\n");
-  output.targets.clear();
-  for (auto p : local_cpus) {
-    if (local_proc == p) continue;
-    output.targets.insert(p);
-    printf("select_steal_targets insert one local cpu processor\n");
-  }
+  // printf("select_steal_targets invoked\n");
+  // output.targets.clear();
+  // for (auto p : local_cpus) {
+  //   if (local_proc == p) continue;
+  //   output.targets.insert(p);
+  //   printf("select_steal_targets insert one local cpu processor\n");
+  // }
+
 }
 
 void DLBMapper::permit_steal_request(const MapperContext       ctx,
                           const StealRequestInput&  input,
                                StealRequestOutput& output)
 {
-  printf("permit_steal_request invoked\n");
-  output.stolen_tasks.clear();
-  // Iterate over stealable tasks
-  for (auto task : input.stealable_tasks) {
-    output.stolen_tasks.insert(task);
-    printf("permit_steal_request insert one stealable task\n");
-  }
+  // printf("permit_steal_request invoked\n");
+  // output.stolen_tasks.clear();
+  // // Iterate over stealable tasks
+  // for (auto task : input.stealable_tasks) {
+  //   output.stolen_tasks.insert(task);
+  //   printf("permit_steal_request insert one stealable task\n");
+  // }
 }
 
 static void create_mappers(Machine machine, Runtime *runtime, const std::set<Processor> &local_procs)

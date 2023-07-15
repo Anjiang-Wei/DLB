@@ -63,13 +63,14 @@ rawset(_G, "ceil", cmath.ceil)
 
 task f(i: int)
 -- just wait for a random number of seconds
-  unistd.sleep(i / 8)
+  unistd.sleep(1 + i / 8)
   format.println("DBL {} wait for {} seconds", i, i / 8)
 end
 
 task toplevel()
   var num_points = 40
-  __demand(__index_launch)
+  -- __demand(__index_launch)
+  __forbid(__index_launch)
   for i = 0, num_points do
     f(i)
   end
