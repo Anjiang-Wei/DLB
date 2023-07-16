@@ -92,7 +92,7 @@ private:
   std::map<Processor, std::deque<InFlightTask>> queue;
   // maxInFlightTasks controls how many tasks can execute at a time
   // on a single processor.
-  size_t maxInFlightTasks = 2;
+  size_t maxInFlightTasks = 1;
 };
 
 DLBMapper::DLBMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -143,7 +143,8 @@ void DLBMapper::select_tasks_to_map(const MapperContext ctx,
   for (auto task : input.ready_tasks) {
     bool schedule = true;
     if (std::string(task->get_task_name()) == std::string("f")) {
-      printf("select_tasks_to_map for f %d\n", (int) task->get_unique_id());
+      printf("select_tasks_to_map for f %d %s, input.ready_tasks.size() = %d\n", (int) task->get_unique_id(),
+            task->stealable ? "stealable" : "non-stealable", (int) input.ready_tasks.size());
     // if (task->task_id == TID_WORKER && this->enableBackPressure) {
       // See how many tasks we have in flight.
       auto inflight = this->queue[task->target_proc];
