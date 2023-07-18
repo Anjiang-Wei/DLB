@@ -70,6 +70,7 @@ end
 task toplevel()
   var num_points = 40
   -- __demand(__index_launch)
+  format.println("pid = {}", unistd.getpid())
   __forbid(__index_launch)
   for i = 0, num_points do
     f(i)
