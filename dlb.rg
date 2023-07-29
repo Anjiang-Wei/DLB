@@ -63,8 +63,15 @@ rawset(_G, "ceil", cmath.ceil)
 
 task f(i: int)
 -- just wait for a random number of seconds
-  unistd.sleep(i % 4)
-  format.println("DLB {} wait for {} seconds", i, i % 4)
+  -- unistd.sleep(i % 4)
+  -- format.println("DLB {} wait for {} seconds", i, i % 4)
+  var sum = 0.0
+  var n = 1.0
+  while n <= 1e9 do
+      sum = sum + n / 2
+      n = n + 0.5
+  end
+  return sum
 end
 
 task toplevel()
@@ -85,10 +92,10 @@ if os.getenv('SAVEOBJ') == '1' then
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
   local link_flags = terralib.newlist({"-L" .. out_dir, "-ldlb_mapper", "-lm"})
 
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
+  -- if os.getenv('STANDALONE') == '1' then
+  --   os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
+  --       regentlib.binding_library .. ' ' .. out_dir)
+  -- end
 
   local exe = os.getenv('OBJNAME') or "dlb"
   regentlib.saveobj(toplevel, exe, "executable", cmapper.register_mappers, link_flags)
