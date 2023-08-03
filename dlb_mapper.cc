@@ -81,6 +81,14 @@ private:
   // maxInFlightTasks controls how many tasks can execute at a time
   // on a single processor.
   size_t maxInFlightTasks = 1;
+  // int num_ready_for_steal = 4;
+  // bool ready_for_steal = false;
+  int kase = 0;// 0: lower than expected; should send stealing requests;
+  // 1: within the range;
+  // 2: higher than expected; should permit stealing
+  int lower_bound = 2;
+  int higher_bound = 10;
+  std::map<int, int> proc_stolen_tasks;
 };
 
 DLBMapper::DLBMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -95,10 +103,10 @@ void DLBMapper::select_task_options(const MapperContext    ctx,
 //--------------------------------------------------------------------------
 {
   // log_mapper.spew("Default select_task_options in %s", get_mapper_name());
-  printf("initial_proc = %d\n", local_cpus[0].id);
+  // printf("initial_proc = %d\n", local_cpus[0].id);
   output.initial_proc = local_cpus[0];// default_policy_select_initial_processor(ctx, task);
   output.inline_task = false;
-  printf("stealable turned on in select_task_options %s\n", task.get_task_name());
+  // printf("stealable turned on in select_task_options %s\n", task.get_task_name());
   output.stealable = true; // turn on stealing!
   output.map_locally = map_locally;
 #ifdef DEBUG_CTRL_REPL
@@ -116,7 +124,7 @@ void DLBMapper::select_tasks_to_map(const MapperContext ctx,
                          const SelectMappingInput& input,
                                SelectMappingOutput& output)
 {
-  std::cout << "timestamp for select_tasks_to_map: " << timeSinceEpochMillisec() << std::endl;
+  // std::cout << "timestamp for select_tasks_to_map: " << timeSinceEpochMillisec() << std::endl;
   // Record when we are scheduling tasks.
   auto schedTime = std::chrono::high_resolution_clock::now();
 
@@ -127,19 +135,38 @@ void DLBMapper::select_tasks_to_map(const MapperContext ctx,
   // on, so that we can keep the processors busy.
   MapperEvent returnEvent;
   auto returnTime = std::chrono::high_resolution_clock::time_point::max();
+  
+  int ready_size = (int) input.ready_tasks.size();
+  if (ready_size < lower_bound)
+  {
+    kase = 0;
+  }
+  else if (ready_size >= lower_bound && ready_size <= higher_bound)
+  {
+    kase = 1;
+  }
+  else
+  {
+    kase = 2;
+  }
+
+    printf("select_tasks_to_map for f, input.ready_tasks.size() = %d, kase = %d, in proc_id = %d\n",
+        (int) input.ready_tasks.size(), kase, local_proc.id);
 
   // Schedule all of our available tasks, except tasks with TID_WORKER,
   // to which we'll backpressure.
   for (auto task : input.ready_tasks) {
     bool schedule = true;
     if (std::string(task->get_task_name()) == std::string("f")) {
-      printf("select_tasks_to_map for f %d %s, input.ready_tasks.size() = %d\n", (int) task->get_unique_id(),
-            task->stealable ? "stealable" : "non-stealable", (int) input.ready_tasks.size());
     // if (task->task_id == TID_WORKER && this->enableBackPressure) {
       // See how many tasks we have in flight.
+      // if (input.ready_tasks.size() >= num_ready_for_steal)
+      // {
+      //   ready_for_steal = true;
+      // }
       auto inflight = this->queue[task->target_proc];
       if (inflight.size() == this->maxInFlightTasks) {
-        printf("enable backpressure!\n");
+        // printf("enable backpressure!\n");
         // We've hit the cap, so we can't schedule any more tasks.
         schedule = false;
         // As a heuristic, we'll wait on the first mapper event to
@@ -179,6 +206,9 @@ void DLBMapper::default_policy_select_target_processors(MapperContext ctx,
                                                         std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+  // for (auto p : local_cpus) {
+  //   target_procs.push_back(p);
+  // }
 }
 
 void DLBMapper::map_task(const MapperContext ctx,
@@ -191,8 +221,8 @@ void DLBMapper::map_task(const MapperContext ctx,
   // to give us profiling information when they complete.
   if (std::string(task.get_task_name()) == std::string("f")) {
     std::deque<InFlightTask>& inflight = this->queue[task.target_proc];
-    printf("map_task for task %s %d, inflight.size() = %d\n",
-            task.get_task_name(), (int) task.get_unique_id(), (int) inflight.size());
+    // printf("map_task for task %s %d, inflight.size() = %d\n",
+    //         task.get_task_name(), (int) task.get_unique_id(), (int) inflight.size());
     output.task_prof_requests.add_measurement<ProfilingMeasurements::OperationStatus>();
   }
 }
@@ -236,13 +266,30 @@ void DLBMapper::select_steal_targets(const MapperContext         ctx,
                           const SelectStealingInput&  input,
                                 SelectStealingOutput& output)
 {
-  std::cout << "timestamp for select_steal_targets: " << timeSinceEpochMillisec() << std::endl;
-  printf("select_steal_targets.input.size() = %d\n", input.blacklist.size());
-  output.targets.clear();
-  for (auto p : local_cpus) {
-    if (local_proc == p) continue;
-    output.targets.insert(p);
-    printf("select_steal_targets insert %d local cpu processor from cpu %d\n", p.id, local_proc.id);
+  // int kase = 0;// 0: lower than expected; should send stealing requests;
+  // 1: within the range;
+  // 2: higher than expected; should permit stealing
+  printf("select_steal_targets from cpu %d\n", local_proc.id);
+  if (kase == 0)
+  {
+    for (auto p : local_cpus) {
+      if (local_proc == p)
+      {
+        continue;
+      }
+      output.targets.insert(p);
+    }
+    printf("select_steal_targets is actually sending requests from cpu %d\n", local_proc.id);
+    // kase = 1;
+  }
+  else if (kase == 1)
+  {
+    return; // do nothing
+  }
+  else
+  {
+    assert(kase == 2);
+    return;
   }
 }
 
@@ -250,12 +297,26 @@ void DLBMapper::permit_steal_request(const MapperContext       ctx,
                           const StealRequestInput&  input,
                                StealRequestOutput& output)
 {
-  std::cout << "timestamp for permit_steal_request: " << timeSinceEpochMillisec() << std::endl;
+  // std::cout << "timestamp for permit_steal_request: " << timeSinceEpochMillisec() << std::endl;
   output.stolen_tasks.clear();
-  // Iterate over stealable tasks
-  for (auto task : input.stealable_tasks) {
-    output.stolen_tasks.insert(task);
-    printf("permit_steal_request insert one stealable task\n");
+  if (kase == 2)
+  {
+    int thief_id = (int) input.thief_proc.id;
+    if (proc_stolen_tasks.count(thief_id) == 0)
+    {
+      proc_stolen_tasks[thief_id] = 1;
+    }
+    else
+    {
+      proc_stolen_tasks[thief_id]++;
+    }
+    if (proc_stolen_tasks[thief_id] <= higher_bound)
+    {
+      output.stolen_tasks.insert(input.stealable_tasks[0]);
+      printf("permit_steal_request works %d out of %d stealable tasks, from cpu %d sending to cpu %d\n",
+         proc_stolen_tasks[thief_id], (int) input.stealable_tasks.size(),
+         (int) local_proc.id, (int) input.thief_proc.id);
+    }
   }
 }
 
@@ -267,6 +328,7 @@ static void create_mappers(Machine machine, Runtime *runtime, const std::set<Pro
     DLBMapper* mapper = new DLBMapper(runtime->get_mapper_runtime(), machine, *it, "circuit_mapper");
     runtime->replace_default_mapper(new LoggingWrapper(mapper), *it);
   }
+  printf("create mappers have replaced %d mappers\n", (int) local_procs.size());
 }
 
 void register_mappers()
