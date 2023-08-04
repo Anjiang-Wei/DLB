@@ -2,6 +2,12 @@
 #BSUB -J run
 #BSUB -W 10
 
+module load gcc/7.3.1
+module load cmake/3.14.5
+module load cuda/11.7.0
+
+export LD_LIBRARY_PATH="/usr/workspace/wsb/wei8/release_exp/legion/bindings/regent:$PWD"
+
 numnodes=$(( ($LSB_DJOB_NUMPROC - 1) / 40))
 
 echo Num nodes: $numnodes
