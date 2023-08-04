@@ -88,7 +88,7 @@ private:
   // 2: higher than expected; should permit stealing
   int lower_bound = 2;
   int higher_bound = 5;
-  std::map<int, int> proc_stolen_tasks;
+  std::map<long long, int> proc_stolen_tasks;
 };
 
 DLBMapper::DLBMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -150,7 +150,7 @@ void DLBMapper::select_tasks_to_map(const MapperContext ctx,
     kase = 2;
   }
 
-    printf("select_tasks_to_map for f, input.ready_tasks.size() = %d, kase = %d, in proc_id = %d\n",
+    printf("select_tasks_to_map for f, input.ready_tasks.size() = %d, kase = %d, in proc_id = %lld\n",
         (int) input.ready_tasks.size(), kase, local_proc.id);
 
   // Schedule all of our available tasks, except tasks with TID_WORKER,
@@ -269,7 +269,7 @@ void DLBMapper::select_steal_targets(const MapperContext         ctx,
   // int kase = 0;// 0: lower than expected; should send stealing requests;
   // 1: within the range;
   // 2: higher than expected; should permit stealing
-  printf("select_steal_targets from cpu %d\n", local_proc.id);
+  printf("select_steal_targets from cpu %lld\n", local_proc.id);
   if (kase == 0)
   {
     for (auto p : local_cpus) {
@@ -282,7 +282,7 @@ void DLBMapper::select_steal_targets(const MapperContext         ctx,
     for (auto p : remote_cpus) {
       output.targets.insert(p);
     }
-    printf("select_steal_targets is actually sending requests from cpu %d\n", local_proc.id);
+    printf("select_steal_targets is actually sending requests from cpu %lld\n", (long long) local_proc.id);
     // kase = 1;
   }
   else if (kase == 1)
@@ -304,7 +304,7 @@ void DLBMapper::permit_steal_request(const MapperContext       ctx,
   output.stolen_tasks.clear();
   if (kase == 2)
   {
-    int thief_id = (int) input.thief_proc.id;
+    long long thief_id = (long long) input.thief_proc.id;
     if (proc_stolen_tasks.count(thief_id) == 0)
     {
       proc_stolen_tasks[thief_id] = 1;
@@ -316,9 +316,9 @@ void DLBMapper::permit_steal_request(const MapperContext       ctx,
     if (proc_stolen_tasks[thief_id] <= higher_bound)
     {
       output.stolen_tasks.insert(input.stealable_tasks[0]);
-      printf("permit_steal_request works %d out of %d stealable tasks, from cpu %d sending to cpu %d\n",
+      printf("permit_steal_request works %d out of %d stealable tasks, from cpu %lld sending to cpu %lld\n",
          proc_stolen_tasks[thief_id], (int) input.stealable_tasks.size(),
-         (int) local_proc.id, (int) input.thief_proc.id);
+         (long long) local_proc.id, (long long) input.thief_proc.id);
     }
   }
 }
