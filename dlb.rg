@@ -92,10 +92,10 @@ if os.getenv('SAVEOBJ') == '1' then
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
   local link_flags = terralib.newlist({"-L" .. out_dir, "-ldlb_mapper", "-lm"})
 
-  -- if os.getenv('STANDALONE') == '1' then
-  --   os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-  --       regentlib.binding_library .. ' ' .. out_dir)
-  -- end
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
+        regentlib.binding_library .. ' ' .. out_dir)
+  end
 
   local exe = os.getenv('OBJNAME') or "dlb"
   regentlib.saveobj(toplevel, exe, "executable", cmapper.register_mappers, link_flags)

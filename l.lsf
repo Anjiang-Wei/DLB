@@ -1,0 +1,11 @@
+#!/bin/bash -eu
+#BSUB -J run
+#BSUB -W 10
+
+numnodes=$(( ($LSB_DJOB_NUMPROC - 1) / 40))
+
+echo Num nodes: $numnodes
+echo Job id: $LSB_JOBID
+
+module load cuda/11.1.0
+jsrun -b none -c ALL_CPUS -g ALL_GPUS -r 1 -n $numnodes dlb -ll:cpu 4 -ll:csize 150000 -level mapper=debug -logfile mapper_ori%.log -lg:prof $numnodes  -lg:prof_logfile prof_%.gz
