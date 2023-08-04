@@ -87,7 +87,7 @@ private:
   // 1: within the range;
   // 2: higher than expected; should permit stealing
   int lower_bound = 2;
-  int higher_bound = 10;
+  int higher_bound = 5;
   std::map<int, int> proc_stolen_tasks;
 };
 
@@ -277,6 +277,9 @@ void DLBMapper::select_steal_targets(const MapperContext         ctx,
       {
         continue;
       }
+      output.targets.insert(p);
+    }
+    for (auto p : remote_cpus) {
       output.targets.insert(p);
     }
     printf("select_steal_targets is actually sending requests from cpu %d\n", local_proc.id);
