@@ -26,6 +26,7 @@ using namespace Legion::Mapping;
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   COMPUTE_TASK_ID,
+  LAST_TASK_ID,
 };
 
 #define num_tasks (40)
@@ -36,19 +37,14 @@ void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
 {
-  Future f_start = runtime->get_current_time(ctx, runtime->issue_execution_fence(ctx));
-  TaskLauncher tl(COMPUTE_TASK_ID, TaskArgument(NULL, 0));
+  TaskLauncher tl1(COMPUTE_TASK_ID, TaskArgument(NULL, 0));
   for (int i = 0; i < num_tasks; i++)
   {
-    runtime->execute_task(ctx, tl);
+    runtime->execute_task(ctx, tl1);
   }
-  Future f_end = runtime->get_current_time(ctx, runtime->issue_execution_fence(ctx));
-  double t_start = f_start.get_result<double>(true /*silence_warnings*/);
-  double t_end = f_end.get_result<double>(true /*silence_warnings*/);
-  int tasks_per_cpu = num_tasks / num_cpus + 2; // 2 is tolerance for imbalance
-  double expected_time = double(tasks_per_cpu * wait_ms) / 1000;
-  // printf("delta = %f, expected to finish within %f\n", t_end - t_start, expected_time);
-  assert(t_end - t_start < expected_time);
+  runtime->issue_execution_fence(ctx);
+  TaskLauncher tl2(LAST_TASK_ID, TaskArgument(NULL, 0));
+  runtime->execute_task(ctx, tl2);
 }
 
 void compute_task(const Task *task,
@@ -56,6 +52,13 @@ void compute_task(const Task *task,
                   Context ctx, Runtime *runtime)
 {
   std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+  return;
+}
+
+void last_task(const Task *task,
+               const std::vector<PhysicalRegion> &regions,
+               Context ctx, Runtime *runtime)
+{
   return;
 }
 
@@ -110,6 +113,7 @@ private:
   int higher_bound = 10;
   // key: processor id; value: number of stolen tasks
   std::map<long long, int> proc_stolen_tasks;
+  int scheduled_tasks = 0; // for assertion
 };
 
 DLBMapper::DLBMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -190,7 +194,12 @@ void DLBMapper::select_tasks_to_map(const MapperContext ctx,
           .event = this->runtime->create_mapper_event(ctx),
           .schedTime = schedTime,
         });
+        this->scheduled_tasks++;
       }
+    }
+    else if (std::string(task->get_task_name()) == std::string("last_task"))
+    {
+      assert(this->scheduled_tasks == num_tasks / num_cpus);
     }
     // Schedule tasks that passed the check.
     if (schedule) {
@@ -338,6 +347,12 @@ int main(int argc, char **argv)
     TaskVariantRegistrar registrar(COMPUTE_TASK_ID, "compute_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     Runtime::preregister_task_variant<compute_task>(registrar, "compute_task");
+  }
+
+  {
+    TaskVariantRegistrar registrar(LAST_TASK_ID, "last_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<last_task>(registrar, "last_task");
   }
 
   register_mappers();
