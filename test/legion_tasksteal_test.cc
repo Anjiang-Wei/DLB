@@ -131,14 +131,7 @@ void DLBMapper::select_task_options(const MapperContext    ctx,
   output.inline_task = false;
   output.stealable = (task.task_id == COMPUTE_TASK_ID ? true : false); // turn on stealing!
   output.map_locally = map_locally;
-#ifdef DEBUG_CTRL_REPL
-  if (task.get_depth() == 0)
-#else
-  if ((total_nodes > 1) && (task.get_depth() == 0))
-#endif
-    output.replicate = replication_enabled;
-  else
-    output.replicate = false;
+  output.replicate = false;
 }
 
 
