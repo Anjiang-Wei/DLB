@@ -273,9 +273,6 @@ void DLBMapper::select_steal_targets(const MapperContext         ctx,
       }
       output.targets.insert(p);
     }
-    for (auto p : remote_cpus) {
-      output.targets.insert(p);
-    }
   }
   else if (kase == 1)
   {
